@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aura P2P - Advanced Comms</title>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+        .glass-panel { background-color: rgba(17, 24, 39, 0.6); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(107, 114, 128, 0.5); border-radius: 3px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(156, 163, 175, 0.6); }
+        .aurora-bg { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
+        .aurora-bg::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: radial-gradient(circle at 10% 20%, rgba(14, 165, 233, 0.3), transparent 40%), radial-gradient(circle at 80% 90%, rgba(139, 92, 246, 0.3), transparent 40%); animation: aurora 20s infinite linear; }
+        @keyframes aurora { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out forwards; }
+        @keyframes popIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+        .animate-popIn { animation: popIn 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards; }
+        .btn { transition: all 0.2s ease-in-out; }
+        .btn:active { transform: scale(0.95); }
+        .btn-primary { background-color: #0ea5e9; color: white; } .btn-primary:hover { background-color: #38bdf8; }
+        .btn-secondary { background-color: rgba(255, 255, 255, 0.1); color: #e5e7eb; } .btn-secondary:hover { background-color: rgba(255, 255, 255, 0.2); }
+        .btn-success { background-color: #16a34a; color: white; } .btn-success:hover { background-color: #22c55e; }
+        .btn-danger { background-color: #dc2626; color: white; } .btn-danger:hover { background-color: #ef4444; }
+        input[type="text"] { background-color: rgba(17, 24, 39, 0.8); border: 1px solid rgba(255, 255, 255, 0.1); }
+        input[type="text"]:focus { border-color: #0ea5e9; box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.5); }
+        #local-video { transform: scaleX(-1); }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-200 flex items-center justify-center min-h-screen p-4">
+    <div class="aurora-bg"></div>
+
+    <div id="app-container" class="w-full max-w-6xl h-[95vh] max-h-[1000px] flex overflow-hidden">
+        
+        <!-- Setup View -->
+        <div id="setup-view" class="w-full flex flex-col items-center justify-center p-8 animate-fadeIn">
+            <div class="w-full max-w-md text-center">
+                <h1 class="text-5xl font-bold text-white mb-2">Aura P2P</h1>
+                <p class="text-gray-400 mb-10">Encrypted, serverless communication.</p>
+                
+                <div class="glass-panel p-8 rounded-2xl shadow-2xl">
+                    <div class="mb-6">
+                        <label for="my-nickname-input" class="block text-sm font-medium text-gray-300 mb-2">Your Nickname</label>
+                        <input type="text" id="my-nickname-input" placeholder="Choose a nickname" class="w-full p-3 rounded-lg outline-none transition">
+                    </div>
+                    <div id="my-id-container" class="bg-gray-900/50 p-3 rounded-lg cursor-copy hover:bg-gray-800/50 transition group mb-6" title="Click to copy your Peer ID">
+                        <span class="text-xs font-medium text-gray-400 mb-1 block">Your Aura ID</span>
+                        <div class="flex items-center justify-center">
+                            <span id="my-id-display" class="truncate font-mono text-gray-300 group-hover:text-white">Initializing...</span>
+                        </div>
+                    </div>
+                    <button id="confirm-setup-btn" class="w-full p-3 rounded-lg font-bold btn btn-primary" disabled>Confirm & Enter</button>
+                    <p id="setup-status" class="text-xs text-gray-400 mt-4 min-h-[16px]"></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main View -->
+        <div id="main-view" class="hidden w-full h-full flex flex-col md:flex-row gap-4 animate-fadeIn">
+            <!-- Left Panel: Connections & Info -->
+            <div class="flex-shrink-0 w-full md:w-80 lg:w-96 glass-panel rounded-2xl p-4 flex flex-col">
+                <h2 class="text-xl font-bold text-white mb-4">Connections</h2>
+                <div class="input-group flex mb-2">
+                    <input type="text" id="receiver-id" placeholder="Enter Peer's Aura ID" class="flex-grow p-3 rounded-l-lg outline-none transition font-mono text-sm">
+                    <button id="connect-btn" class="p-3 rounded-r-lg font-bold btn btn-primary flex items-center">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                    </button>
+                </div>
+                <p id="connection-status" class="text-xs text-center text-gray-400 min-h-[16px] mb-4"></p>
+                
+                <div class="flex-grow custom-scrollbar pr-2 -mr-2 overflow-y-auto">
+                    <div id="peer-info-card" class="hidden p-4 bg-gray-900/50 rounded-xl">
+                        <div class="flex items-center mb-4">
+                            <div id="peer-avatar" class="w-12 h-12 rounded-full bg-purple-600 flex items-center justify-center font-bold text-white text-xl mr-4"></div>
+                            <div>
+                                <h3 id="peer-nickname-display" class="font-bold text-lg text-white">Peer</h3>
+                                <p id="peer-id-display" class="text-xs text-gray-400 font-mono truncate max-w-[150px]"></p>
+                            </div>
+                        </div>
+                        <div class="flex gap-2">
+                            <button id="call-btn" class="w-full p-2 rounded-lg font-semibold btn btn-success flex items-center justify-center gap-2">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                                Call
+                            </button>
+                            <button id="disconnect-btn" class="p-2 rounded-lg btn btn-danger">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel: Chat & Video -->
+            <div id="chat-video-container" class="flex-1 glass-panel rounded-2xl flex flex-col overflow-hidden relative">
+                <!-- Video Call View -->
+                <div id="video-call-view" class="hidden absolute inset-0 bg-gray-900 z-20 flex flex-col items-center justify-center animate-fadeIn">
+                    <video id="remote-video" class="w-full h-full object-contain" autoplay playsinline></video>
+                    <div id="local-video-wrapper" class="absolute w-1/4 max-w-[240px] bottom-20 md:bottom-4 right-4 rounded-lg shadow-2xl border-2 border-white/20 overflow-hidden glass-panel">
+                        <video id="local-video" class="w-full h-full object-cover" autoplay muted playsinline></video>
+                    </div>
+                    <div id="call-controls" class="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center space-x-2 md:space-x-4 glass-panel p-3 rounded-full shadow-lg">
+                        <button id="toggle-audio-btn" class="p-3 rounded-full btn btn-secondary"></button>
+                        <button id="toggle-video-btn" class="p-3 rounded-full btn btn-secondary"></button>
+                        <button id="toggle-screen-btn" class="p-3 rounded-full btn btn-secondary"></button>
+                        <button id="pip-btn" class="p-3 rounded-full btn btn-secondary hidden md:block"></button>
+                        <select id="quality-select" class="p-3 rounded-full btn btn-secondary outline-none appearance-none text-sm font-semibold"></select>
+                        <button id="hang-up-btn" class="p-3 rounded-full btn btn-danger"></button>
+                    </div>
+                </div>
+                
+                <!-- Chat View -->
+                <div id="chat-view" class="flex-1 flex flex-col p-4 overflow-hidden">
+                    <div id="chat-messages" class="flex-grow overflow-y-auto space-y-4 mb-3 pr-2 custom-scrollbar">
+                        <div class="text-center text-gray-400">Connect with a peer to start chatting.</div>
+                    </div>
+                    <div id="typing-indicator" class="text-xs text-sky-400 min-h-[1.1em] italic mb-1 pl-1"></div>
+                    <form id="chat-input-form" class="flex items-center border-t border-white/10 pt-3 mt-1">
+                        <input type="file" id="file-input" class="hidden">
+                        <button type="button" id="attach-file-btn" title="Attach file" class="p-3 text-gray-400 hover:text-sky-400 transition-colors mr-2 rounded-full hover:bg-white/10 btn">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
+                        </button>
+                        <input type="text" id="message-input" placeholder="Type a message..." class="flex-grow p-3 rounded-full outline-none transition text-sm" disabled>
+                        <button type="submit" id="send-message-btn" class="p-3 rounded-full transition-all flex items-center justify-center ml-2 btn btn-primary" disabled>
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Incoming Call Modal -->
+    <div id="incoming-call-modal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50 animate-fadeIn">
+        <div class="glass-panel rounded-2xl p-8 shadow-2xl text-center animate-popIn w-full max-w-sm">
+            <h3 class="text-2xl font-bold text-white mb-2">Incoming Call</h3>
+            <div class="flex items-center justify-center my-6">
+                <div id="caller-avatar" class="w-16 h-16 rounded-full bg-purple-600 flex items-center justify-center font-bold text-white text-2xl mr-4"></div>
+                <p id="caller-nickname" class="text-xl text-gray-200"></p>
+            </div>
+            <div class="flex space-x-4">
+                <button id="accept-call-btn" class="flex-1 font-bold py-3 px-6 rounded-lg btn btn-success">Accept</button>
+                <button id="decline-call-btn" class="flex-1 font-bold py-3 px-6 rounded-lg btn btn-danger">Decline</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const dom = {
+                app: document.getElementById('app-container'),
+                setupView: document.getElementById('setup-view'),
+                mainView: document.getElementById('main-view'),
+                myNicknameInput: document.getElementById('my-nickname-input'),
+                myIdDisplay: document.getElementById('my-id-display'),
+                confirmSetupBtn: document.getElementById('confirm-setup-btn'),
+                setupStatus: document.getElementById('setup-status'),
+                receiverIdInput: document.getElementById('receiver-id'),
+                connectBtn: document.getElementById('connect-btn'),
+                connectionStatus: document.getElementById('connection-status'),
+                peerInfoCard: document.getElementById('peer-info-card'),
+                peerAvatar: document.getElementById('peer-avatar'),
+                peerNicknameDisplay: document.getElementById('peer-nickname-display'),
+                peerIdDisplay: document.getElementById('peer-id-display'),
+                callBtn: document.getElementById('call-btn'),
+                disconnectBtn: document.getElementById('disconnect-btn'),
+                chatVideoContainer: document.getElementById('chat-video-container'),
+                videoCallView: document.getElementById('video-call-view'),
+                remoteVideo: document.getElementById('remote-video'),
+                localVideo: document.getElementById('local-video'),
+                callControls: document.getElementById('call-controls'),
+                toggleAudioBtn: document.getElementById('toggle-audio-btn'),
+                toggleVideoBtn: document.getElementById('toggle-video-btn'),
+                toggleScreenBtn: document.getElementById('toggle-screen-btn'),
+                pipBtn: document.getElementById('pip-btn'),
+                qualitySelect: document.getElementById('quality-select'),
+                hangUpBtn: document.getElementById('hang-up-btn'),
+                chatView: document.getElementById('chat-view'),
+                chatMessages: document.getElementById('chat-messages'),
+                typingIndicator: document.getElementById('typing-indicator'),
+                chatInputForm: document.getElementById('chat-input-form'),
+                fileInput: document.getElementById('file-input'),
+                attachFileBtn: document.getElementById('attach-file-btn'),
+                messageInput: document.getElementById('message-input'),
+                sendMessageBtn: document.getElementById('send-message-btn'),
+                incomingCallModal: document.getElementById('incoming-call-modal'),
+                callerAvatar: document.getElementById('caller-avatar'),
+                callerNickname: document.getElementById('caller-nickname'),
+                acceptCallBtn: document.getElementById('accept-call-btn'),
+                declineCallBtn: document.getElementById('decline-call-btn'),
+            };
+
+            const icons = {
+                micOn: `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>`,
+                micOff: `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.586 15.586a7 7 0 01-9.172-9.172l9.172 9.172zM19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>`,
+                videoOn: `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>`,
+                videoOff: `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"></path></svg>`,
+                screenOn: `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>`,
+                pip: `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>`,
+                hangUp: `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8l2-2m0 0l2 2m-2-2v2.5M20 14v.5a2.5 2.5 0 01-2.5 2.5h-10A2.5 2.5 0 015 14.5V8.25A2.25 2.25 0 017.25 6H10"></path></svg>`,
+            };
+
+            const qualityOptions = {
+                '360p': { width: { ideal: 640 }, height: { ideal: 360 } },
+                '720p (HD)': { width: { ideal: 1280 }, height: { ideal: 720 } },
+                '1080p (FHD)': { width: { ideal: 1920 }, height: { ideal: 1080 } },
+            };
+
+            const state = {
+                peer: null,
+                myPeerId: null,
+                dataConnection: null,
+                mediaConnection: null,
+                localStream: null,
+                cameraStream: null,
+                isScreenSharing: false,
+                myNickname: localStorage.getItem('auraP2PNickname') || '',
+                remoteNickname: 'Peer',
+                typingTimeout: null,
+            };
+
+            const ui = {
+                init() {
+                    dom.myNicknameInput.value = state.myNickname;
+                    dom.toggleAudioBtn.innerHTML = icons.micOn;
+                    dom.toggleVideoBtn.innerHTML = icons.videoOn;
+                    dom.toggleScreenBtn.innerHTML = icons.screenOn;
+                    dom.pipBtn.innerHTML = icons.pip;
+                    dom.hangUpBtn.innerHTML = icons.hangUp;
+                    Object.keys(qualityOptions).forEach(q => {
+                        const option = document.createElement('option');
+                        option.value = q;
+                        option.textContent = q;
+                        dom.qualitySelect.appendChild(option);
+                    });
+                    dom.qualitySelect.value = '720p (HD)';
+                    if (!('pictureInPictureEnabled' in document)) dom.pipBtn.style.display = 'none';
+                },
+                showView(view) {
+                    dom.setupView.classList.add('hidden');
+                    dom.mainView.classList.add('hidden');
+                    if (view === 'main') dom.mainView.classList.remove('hidden');
+                    else dom.setupView.classList.remove('hidden');
+                },
+                updateAvatar(element, nickname) {
+                    const initial = (nickname || '?').charAt(0).toUpperCase();
+                    element.textContent = initial;
+                    const colors = ['bg-sky-500', 'bg-emerald-500', 'bg-indigo-500', 'bg-purple-500', 'bg-pink-500', 'bg-amber-500'];
+                    const colorClass = colors[initial.charCodeAt(0) % colors.length];
+                    element.className = element.className.replace(/bg-\w+-\d+/g, '');
+                    element.classList.add(colorClass);
+                },
+                appendSystemMessage(text, isError = false) {
+                    const messageDiv = document.createElement('div');
+                    messageDiv.className = 'text-center my-2 px-2 animate-fadeIn';
+                    const textP = document.createElement('p');
+                    textP.className = `text-xs italic py-1 px-3 rounded-full inline-block shadow ${isError ? 'text-red-300 bg-red-500/30' : 'text-gray-400 bg-gray-700/50'}`;
+                    textP.textContent = text;
+                    messageDiv.appendChild(textP);
+                    dom.chatMessages.appendChild(messageDiv);
+                    ui.scrollToBottom();
+                },
+                appendMessage(data, originType) {
+                    const isSent = originType === 'sent';
+                    const wrapper = document.createElement('div');
+                    wrapper.className = `flex animate-fadeIn w-full ${isSent ? 'justify-end' : 'justify-start'}`;
+                    const bubble = document.createElement('div');
+                    bubble.className = `p-3 rounded-xl max-w-[80%] shadow-md text-sm relative group ${isSent ? 'bg-sky-600 text-white' : 'glass-panel'}`;
+                    
+                    if (data.type === 'chat') {
+                        const textElement = document.createElement('p');
+                        textElement.className = 'break-words whitespace-pre-wrap';
+                        const linkRegex = /(https?:\/\/[^\s]+)/g;
+                        const escapedText = data.text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                        textElement.innerHTML = escapedText.replace(linkRegex, '<a href="$1" target="_blank" rel="noopener noreferrer" class="underline hover:text-sky-300 transition-colors">$1</a>');
+                        bubble.appendChild(textElement);
+                    } else if (data.type === 'file') {
+                        const fileContainer = document.createElement('div');
+                        fileContainer.className = 'flex items-center gap-3 p-2 rounded-lg bg-black/20';
+                        fileContainer.innerHTML = `<div class="flex-shrink-0"><svg class="w-8 h-8 ${isSent ? 'text-sky-200' : 'text-gray-300'}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg></div>`;
+                        const fileTextDetails = document.createElement('div');
+                        fileTextDetails.innerHTML = `<p class="font-medium truncate max-w-[150px]">${data.filename}</p><p class="text-xs opacity-70">${(data.filesize / 1024 / 1024).toFixed(2)} MB</p>`;
+                        fileContainer.appendChild(fileTextDetails);
+                        const downloadBtn = document.createElement('button');
+                        downloadBtn.innerHTML = `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>`;
+                        downloadBtn.className = 'ml-auto p-2 rounded-full hover:bg-white/20 transition';
+                        downloadBtn.onclick = () => {
+                            const blob = new Blob([data.data], { type: data.filetype });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = data.filename;
+                            a.click();
+                            URL.revokeObjectURL(url);
+                        };
+                        fileContainer.appendChild(downloadBtn);
+                        bubble.appendChild(fileContainer);
+                    }
+                    wrapper.appendChild(bubble);
+                    dom.chatMessages.appendChild(wrapper);
+                    ui.scrollToBottom();
+                },
+                resetConnectionUI() {
+                    dom.peerInfoCard.classList.add('hidden');
+                    dom.messageInput.disabled = true;
+                    dom.sendMessageBtn.disabled = true;
+                    dom.attachFileBtn.disabled = true;
+                    dom.connectBtn.disabled = false;
+                    dom.receiverIdInput.disabled = false;
+                    dom.receiverIdInput.value = '';
+                    dom.chatMessages.innerHTML = '<div class="text-center text-gray-400">Connect with a peer to start chatting.</div>';
+                    ui.hideCallView();
+                },
+                showCallView() {
+                    dom.videoCallView.classList.remove('hidden');
+                    dom.chatVideoContainer.classList.remove('md:flex-row');
+                    dom.chatVideoContainer.classList.add('video-active');
+                },
+                hideCallView() {
+                    dom.videoCallView.classList.add('hidden');
+                    dom.chatVideoContainer.classList.add('md:flex-row');
+                    dom.chatVideoContainer.classList.remove('video-active');
+                    if (document.pictureInPictureElement) document.exitPictureInPicture();
+                    streamHandler.stopAllStreams();
+                },
+                scrollToBottom: () => setTimeout(() => dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight, 50),
+            };
+
+            const streamHandler = {
+                async getMedia(constraints) {
+                    try {
+                        const audioConstraints = { echoCancellation: true, noiseSuppression: true };
+                        const stream = await navigator.mediaDevices.getUserMedia({ video: constraints, audio: audioConstraints });
+                        state.localStream = stream;
+                        if (!state.isScreenSharing) state.cameraStream = stream;
+                        dom.localVideo.srcObject = stream;
+                        return stream;
+                    } catch (err) {
+                        ui.appendSystemMessage('Could not access camera/microphone. Check permissions.', true);
+                        console.error("getUserMedia error:", err);
+                        return null;
+                    }
+                },
+                async startScreenShare() {
+                    if (state.isScreenSharing) return;
+                    try {
+                        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+                        state.isScreenSharing = true;
+                        ui.appendSystemMessage('You started screen sharing.');
+                        peerHandler.sendData({ type: 'system', event: 'screen_share_start' });
+                        
+                        const screenVideoTrack = screenStream.getVideoTracks()[0];
+                        streamHandler.replaceTrack(screenVideoTrack);
+                        dom.toggleScreenBtn.classList.add('btn-primary');
+                        
+                        screenVideoTrack.onended = () => streamHandler.stopScreenShare();
+                    } catch (err) {
+                        console.error("getDisplayMedia error:", err);
+                    }
+                },
+                stopScreenShare() {
+                    if (!state.isScreenSharing) return;
+                    state.isScreenSharing = false;
+                    ui.appendSystemMessage('You stopped screen sharing.');
+                    peerHandler.sendData({ type: 'system', event: 'screen_share_stop' });
+                    
+                    const cameraVideoTrack = state.cameraStream.getVideoTracks()[0];
+                    streamHandler.replaceTrack(cameraVideoTrack);
+                    dom.toggleScreenBtn.classList.remove('btn-primary');
+                },
+                replaceTrack(newTrack) {
+                    const sender = state.mediaConnection.peerConnection.getSenders().find(s => s.track.kind === newTrack.kind);
+                    if (sender) sender.replaceTrack(newTrack);
+                },
+                async changeQuality(qualityKey) {
+                    if (!state.localStream || state.isScreenSharing) return;
+                    const constraints = qualityOptions[qualityKey];
+                    if (!constraints) return;
+                    
+                    state.localStream.getTracks().forEach(track => track.stop());
+                    const newStream = await streamHandler.getMedia(constraints);
+                    if (newStream) {
+                        streamHandler.replaceTrack(newStream.getVideoTracks()[0]);
+                        ui.appendSystemMessage(`Video quality set to ${qualityKey}.`);
+                    }
+                },
+                stopAllStreams() {
+                    if (state.localStream) {
+                        state.localStream.getTracks().forEach(track => track.stop());
+                        state.localStream = null;
+                    }
+                    if (state.cameraStream) {
+                        state.cameraStream.getTracks().forEach(track => track.stop());
+                        state.cameraStream = null;
+                    }
+                    dom.localVideo.srcObject = null;
+                    dom.remoteVideo.srcObject = null;
+                    state.isScreenSharing = false;
+                    dom.toggleScreenBtn.classList.remove('btn-primary');
+                }
+            };
+
+            const peerHandler = {
+                initialize() {
+                    try {
+                        state.peer = new Peer(undefined, { debug: 0 });
+                        state.peer.on('open', id => {
+                            state.myPeerId = id;
+                            dom.myIdDisplay.textContent = id;
+                            dom.confirmSetupBtn.disabled = false;
+                            dom.setupStatus.textContent = 'Ready to go!';
+                        });
+                        state.peer.on('connection', conn => {
+                            if (state.dataConnection && state.dataConnection.open) {
+                                conn.on('open', () => conn.send({ type: 'system', event: 'busy' }));
+                                setTimeout(() => conn.close(), 500);
+                                return;
+                            }
+                            state.dataConnection = conn;
+                            peerHandler.setupDataConnectionEvents(conn);
+                        });
+                        state.peer.on('call', call => {
+                            state.mediaConnection = call;
+                            state.remoteNickname = call.metadata.nickname;
+                            dom.callerNickname.textContent = state.remoteNickname;
+                            ui.updateAvatar(dom.callerAvatar, state.remoteNickname);
+                            dom.incomingCallModal.classList.remove('hidden');
+                        });
+                        state.peer.on('error', err => {
+                            console.error('PeerJS error:', err);
+                            dom.connectionStatus.textContent = `Error: ${err.type}`;
+                            if (err.type === 'peer-unavailable') ui.resetConnectionUI();
+                        });
+                    } catch (error) {
+                        alert("Critical Error: PeerJS could not be initialized.");
+                    }
+                },
+                connectToPeer() {
+                    const receiverId = dom.receiverIdInput.value.trim();
+                    if (!receiverId || receiverId === state.myPeerId) return;
+                    dom.connectionStatus.textContent = `Connecting...`;
+                    dom.connectBtn.disabled = true;
+                    const conn = state.peer.connect(receiverId, { reliable: true, metadata: { nickname: state.myNickname } });
+                    state.dataConnection = conn;
+                    peerHandler.setupDataConnectionEvents(conn);
+                },
+                setupDataConnectionEvents(conn) {
+                    conn.on('open', () => {
+                        state.remoteNickname = conn.metadata.nickname;
+                        dom.peerNicknameDisplay.textContent = state.remoteNickname;
+                        dom.peerIdDisplay.textContent = conn.peer;
+                        ui.updateAvatar(dom.peerAvatar, state.remoteNickname);
+                        dom.peerInfoCard.classList.remove('hidden');
+                        dom.messageInput.disabled = false;
+                        dom.sendMessageBtn.disabled = false;
+                        dom.attachFileBtn.disabled = false;
+                        dom.connectBtn.disabled = true;
+                        dom.receiverIdInput.disabled = true;
+                        dom.connectionStatus.textContent = `Connected to ${state.remoteNickname}`;
+                        dom.chatMessages.innerHTML = '';
+                        ui.appendSystemMessage(`Chat started with ${state.remoteNickname}.`);
+                    });
+                    conn.on('data', data => peerHandler.handleData(data));
+                    conn.on('close', () => {
+                        ui.appendSystemMessage(`${state.remoteNickname} has disconnected.`);
+                        ui.resetConnectionUI();
+                    });
+                },
+                handleData(data) {
+                    switch (data.type) {
+                        case 'chat':
+                        case 'file':
+                            ui.appendMessage(data, 'received');
+                            dom.typingIndicator.textContent = '';
+                            break;
+                        case 'typing':
+                            dom.typingIndicator.textContent = data.status ? `${state.remoteNickname} is typing...` : '';
+                            break;
+                        case 'system':
+                            if (data.event === 'busy') {
+                                dom.connectionStatus.textContent = 'Peer is busy.';
+                                ui.resetConnectionUI();
+                            } else if (data.event === 'screen_share_start') {
+                                ui.appendSystemMessage(`${state.remoteNickname} started screen sharing.`);
+                            } else if (data.event === 'screen_share_stop') {
+                                ui.appendSystemMessage(`${state.remoteNickname} stopped screen sharing.`);
+                            }
+                            break;
+                    }
+                },
+                sendData(payload) {
+                    if (state.dataConnection && state.dataConnection.open) {
+                        state.dataConnection.send(payload);
+                    }
+                },
+                async startCall() {
+                    const stream = await streamHandler.getMedia(qualityOptions[dom.qualitySelect.value]);
+                    if (stream) {
+                        const call = state.peer.call(state.dataConnection.peer, stream, { metadata: { nickname: state.myNickname } });
+                        state.mediaConnection = call;
+                        peerHandler.setupMediaConnectionEvents(call);
+                        ui.showCallView();
+                    }
+                },
+                async answerCall() {
+                    dom.incomingCallModal.classList.add('hidden');
+                    const stream = await streamHandler.getMedia(qualityOptions[dom.qualitySelect.value]);
+                    if (stream) {
+                        state.mediaConnection.answer(stream);
+                        peerHandler.setupMediaConnectionEvents(state.mediaConnection);
+                        ui.showCallView();
+                    }
+                },
+                setupMediaConnectionEvents(call) {
+                    call.on('stream', remoteStream => {
+                        dom.remoteVideo.srcObject = remoteStream;
+                    });
+                    call.on('close', () => {
+                        ui.hideCallView();
+                        ui.appendSystemMessage('Call ended.');
+                        state.mediaConnection = null;
+                    });
+                    call.on('error', err => {
+                        console.error('Call error:', err);
+                        ui.appendSystemMessage(`Call error: ${err.type}`, true);
+                        ui.hideCallView();
+                    });
+                }
+            };
+
+            const eventListeners = {
+                init() {
+                    dom.confirmSetupBtn.addEventListener('click', eventListeners.onConfirmSetup);
+                    dom.connectBtn.addEventListener('click', peerHandler.connectToPeer);
+                    dom.disconnectBtn.addEventListener('click', () => state.dataConnection.close());
+                    dom.chatInputForm.addEventListener('submit', eventListeners.onSendMessage);
+                    dom.messageInput.addEventListener('input', eventListeners.onTyping);
+                    dom.attachFileBtn.addEventListener('click', () => dom.fileInput.click());
+                    dom.fileInput.addEventListener('change', eventListeners.onFileSelect);
+                    dom.callBtn.addEventListener('click', peerHandler.startCall);
+                    dom.acceptCallBtn.addEventListener('click', peerHandler.answerCall);
+                    dom.declineCallBtn.addEventListener('click', () => dom.incomingCallModal.classList.add('hidden'));
+                    dom.hangUpBtn.addEventListener('click', () => state.mediaConnection.close());
+                    dom.toggleAudioBtn.addEventListener('click', eventListeners.onToggleAudio);
+                    dom.toggleVideoBtn.addEventListener('click', eventListeners.onToggleVideo);
+                    dom.toggleScreenBtn.addEventListener('click', () => state.isScreenSharing ? streamHandler.stopScreenShare() : streamHandler.startScreenShare());
+                    dom.pipBtn.addEventListener('click', eventListeners.onPipToggle);
+                    dom.qualitySelect.addEventListener('change', e => streamHandler.changeQuality(e.target.value));
+                    window.addEventListener('beforeunload', () => state.peer && !state.peer.destroyed && state.peer.destroy());
+                },
+                onConfirmSetup() {
+                    const nickname = dom.myNicknameInput.value.trim();
+                    if (nickname) {
+                        state.myNickname = nickname;
+                        localStorage.setItem('auraP2PNickname', nickname);
+                        ui.showView('main');
+                    } else {
+                        dom.setupStatus.textContent = 'Please enter a nickname.';
+                    }
+                },
+                onSendMessage(e) {
+                    e.preventDefault();
+                    const text = dom.messageInput.value.trim();
+                    if (!text) return;
+                    const payload = { type: 'chat', text, timestamp: Date.now() };
+                    peerHandler.sendData(payload);
+                    ui.appendMessage(payload, 'sent');
+                    dom.messageInput.value = '';
+                    if (state.typingTimeout) clearTimeout(state.typingTimeout);
+                    peerHandler.sendData({ type: 'typing', status: false });
+                    state.typingTimeout = null;
+                },
+                onTyping() {
+                    if (!state.typingTimeout) peerHandler.sendData({ type: 'typing', status: true });
+                    clearTimeout(state.typingTimeout);
+                    state.typingTimeout = setTimeout(() => {
+                        peerHandler.sendData({ type: 'typing', status: false });
+                        state.typingTimeout = null;
+                    }, 1500);
+                },
+                onFileSelect(e) {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    if (file.size > 100 * 1024 * 1024) {
+                        ui.appendSystemMessage('File size cannot exceed 100MB.', true);
+                        return;
+                    }
+                    const reader = new FileReader();
+                    reader.onload = re => {
+                        const payload = { type: 'file', filename: file.name, filetype: file.type, filesize: file.size, data: re.target.result };
+                        peerHandler.sendData(payload);
+                        ui.appendMessage(payload, 'sent');
+                    };
+                    reader.readAsArrayBuffer(file);
+                },
+                onToggleAudio() {
+                    const audioTrack = state.localStream.getAudioTracks()[0];
+                    audioTrack.enabled = !audioTrack.enabled;
+                    dom.toggleAudioBtn.innerHTML = audioTrack.enabled ? icons.micOn : icons.micOff;
+                },
+                onToggleVideo() {
+                    if (state.isScreenSharing) return;
+                    const videoTrack = state.localStream.getVideoTracks()[0];
+                    videoTrack.enabled = !videoTrack.enabled;
+                    dom.toggleVideoBtn.innerHTML = videoTrack.enabled ? icons.videoOn : icons.videoOff;
+                },
+                async onPipToggle() {
+                    try {
+                        if (document.pictureInPictureElement) {
+                            await document.exitPictureInPicture();
+                        } else if (document.pictureInPictureEnabled) {
+                            await dom.remoteVideo.requestPictureInPicture();
+                        }
+                    } catch (err) {
+                        console.error("PiP Error:", err);
+                    }
+                }
+            };
+
+            ui.init();
+            eventListeners.init();
+            peerHandler.initialize();
+        });
+    </script>
+</body>
+</html>
